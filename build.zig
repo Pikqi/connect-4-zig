@@ -38,6 +38,9 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(ray_dep.artifact("raylib"));
     exe_check.linkLibrary(ray_dep.artifact("raylib"));
 
+    const check = b.step("check", "Check if it compiles");
+    check.dependOn(&exe_check.step);
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
