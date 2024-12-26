@@ -4,6 +4,7 @@ const r = @cImport({
     @cInclude("raymath.h");
     @cInclude("rlgl.h");
 });
+const Position = @Vector(2, usize);
 
 const RED = 2;
 const YELLOW = 1;
@@ -16,6 +17,7 @@ const columns = 7;
 
 pub fn main() !void {
     var isYellow = true;
+    var gameOvew = false;
 
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -24,21 +26,6 @@ pub fn main() !void {
 
     var gameTable: [rows][columns]u2 = std.mem.zeroes([rows][columns]u2);
 
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    for (gameTable, 0..) |row, i| {
-        try stdout.print("i: {d} ", .{i});
-        for (row) |
-            value,
-        | {
-            try stdout.print("{d}", .{value});
-        }
-        try stdout.print("\n", .{});
-    }
-    try bw.flush(); // don't forget to flush!
-
     while (!r.WindowShouldClose()) {
         const windowWidth = r.GetRenderWidth();
         _ = windowWidth; // autofix
@@ -46,13 +33,28 @@ pub fn main() !void {
         if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
             const mousePos = r.GetMousePosition();
             _ = mousePos; // autofix
-            placePoint(&isYellow, &gameTable, r.GetMousePosition());
+            const placedPointOpt = placePoint(&isYellow, &gameTable, r.GetMousePosition());
+            if (placedPointOpt) |placedPoint| {
+                if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
+                    std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
+                    gameOvew = true;
+                }
+            }
         }
 
         // DRAW
         r.BeginDrawing();
         defer r.EndDrawing();
         r.ClearBackground(r.WHITE);
+        if (gameOvew) {
+            if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
+                gameOvew = false;
+                gameTable = std.mem.zeroes([rows][columns]u2);
+                isYellow = true;
+            }
+            continue;
+        }
+
         for (1..columns) |i| {
             const x = @as(c_int, @intCast(i)) * columnSize;
 
@@ -73,23 +75,130 @@ pub fn main() !void {
         }
     }
 }
-fn placePoint(isYellow: *bool, gameTable: *[rows][columns]u2, mousePosition: r.struct_Vector2) void {
+
+fn placePoint(isYellow: *bool, gameTable: *[rows][columns]u2, mousePosition: r.struct_Vector2) ?Position {
     const column: usize = @intFromFloat(@divFloor(mousePosition.x, @as(f32, @floatFromInt(columnSize))));
     if (column > columns - 1) {
         std.log.info("Clicked outside", .{});
-        return;
+        return null;
     }
     if (gameTable.*[rows - 1][column] != 0) {
         std.log.info("Column full", .{});
-        return;
+        return null;
     }
     for (gameTable, 0..) |row, i| {
         if (row[column] == 0) {
             gameTable[i][column] = if (isYellow.*) 1 else 2;
             isYellow.* = !isYellow.*;
-            return;
+            return Position{ i, column };
         }
     }
+    return null;
+}
+
+fn checkGameOver(gameTable: *[rows][columns]u2, lastMove: Position, isYellow: bool) bool {
+    const target: u2 = if (isYellow) YELLOW else RED;
+    const col = lastMove[1];
+    const row = lastMove[0];
+
+    // Check down
+    var i: usize = row;
+    while (gameTable[i][col] == target) {
+        if (row - i >= 3 and i >= 0) {
+            return true;
+        }
+        if (i > 0) {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+
+    // Check Horizontal
+    var left: i5 = 0;
+    var horizontal: isize = @as(isize, @intCast(col)) - 1;
+    while (horizontal >= 0 and gameTable[row][@intCast(horizontal)] == target) {
+        left += 1;
+        horizontal -= 1;
+    }
+    var right: i5 = 0;
+    horizontal = @intCast(col + 1);
+    while (horizontal < columns and gameTable[row][@intCast(horizontal)] == target) {
+        right += 1;
+        horizontal += 1;
+    }
+
+    if (left + right >= 3) {
+        return true;
+    }
+
+    //l2r diagonal
+    left = 0;
+    horizontal = @as(isize, @intCast(col)) - 1;
+    var vertical: isize = @as(isize, @intCast(row)) - 1;
+    while (horizontal >= 0 and vertical >= 0 and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
+        left += 1;
+        horizontal -= 1;
+        vertical -= 1;
+    }
+
+    right = 0;
+    horizontal = @as(isize, @intCast(col)) + 1;
+    vertical = @as(isize, @intCast(row)) + 1;
+
+    while (horizontal < columns and vertical < rows and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
+        right += 1;
+        horizontal += 1;
+        vertical += 1;
+    }
+
+    if (left + right >= 3) {
+        return true;
+    }
+
+    //r2l diagonal
+    left = 0;
+    horizontal = @as(isize, @intCast(col)) - 1;
+    vertical = @as(isize, @intCast(row)) + 1;
+    while (horizontal >= 0 and vertical < rows and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
+        left += 1;
+        horizontal -= 1;
+        vertical += 1;
+    }
+
+    right = 0;
+    horizontal = @as(isize, @intCast(col)) + 1;
+    vertical = @as(isize, @intCast(row)) - 1;
+
+    while (horizontal < columns and vertical > 0 and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
+        right += 1;
+        horizontal += 1;
+        vertical -= 1;
+    }
+
+    if (left + right >= 3) {
+        return true;
+    }
+
+    return false;
+}
+
+fn printGame(gameTable: [rows][columns]u2) !void {
+    const stdout_file = std.io.getStdOut().writer();
+    var bw = std.io.bufferedWriter(stdout_file);
+    const stdout = bw.writer();
+
+    for (gameTable, 0..) |row, i| {
+        try stdout.print("i: {d} ", .{i});
+        for (row) |
+            value,
+        | {
+            try stdout.print("{d}", .{value});
+        }
+        try stdout.print("\n", .{});
+    }
+    try bw.flush(); // don't forget to flush!
+
 }
 
 test "simple test" {
