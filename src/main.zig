@@ -6,6 +6,7 @@ const r = @cImport({
 });
 const Position = @Vector(2, usize);
 
+const EMPTY = 0;
 const RED = 2;
 const YELLOW = 1;
 
@@ -36,7 +37,10 @@ pub fn main() !void {
             _ = mousePos; // autofix
             const placedPointOpt = placePoint(&isYellow, &gameTable, r.GetMousePosition());
             if (placedPointOpt) |placedPoint| {
-                if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
+                if (checkGameTie(gameTable)) {
+                    std.log.info("GAME TIED", .{});
+                    gameOvew = true;
+                } else if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
                     std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
                     gameOvew = true;
                 }
@@ -64,7 +68,7 @@ pub fn main() !void {
 
         for (gameTable, 0..) |row, i| {
             for (row, 0..) |value, j| {
-                if (value != 0) {
+                if (value != EMPTY) {
                     r.DrawCircle(
                         @as(c_int, @intCast(j + 1)) * columnSize - radius,
                         windowHeight - columnSize * @as(c_int, @intCast(i)) - radius,
@@ -88,7 +92,7 @@ fn placePoint(isYellow: *bool, gameTable: *GameTable, mousePosition: r.struct_Ve
         return null;
     }
     for (gameTable, 0..) |row, i| {
-        if (row[column] == 0) {
+        if (row[column] == EMPTY) {
             gameTable[i][column] = if (isYellow.*) 1 else 2;
             isYellow.* = !isYellow.*;
             return Position{ i, column };
@@ -182,6 +186,16 @@ fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool
     }
 
     return false;
+}
+
+fn checkGameTie(gameTable: GameTable) bool {
+    printGame(gameTable) catch unreachable;
+    for (gameTable[gameTable.len - 1]) |value| {
+        if (value == EMPTY) {
+            return false;
+        }
+    }
+    return true;
 }
 
 fn printGame(gameTable: GameTable) !void {
