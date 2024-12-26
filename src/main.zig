@@ -14,6 +14,7 @@ const columnSize: c_int = radius * 2;
 
 const rows = 6;
 const columns = 7;
+const GameTable = [rows][columns]u2;
 
 pub fn main() !void {
     var isYellow = true;
@@ -24,7 +25,7 @@ pub fn main() !void {
     r.SetConfigFlags(r.FLAG_VSYNC_HINT | r.FLAG_MSAA_4X_HINT | r.FLAG_WINDOW_RESIZABLE);
     r.InitWindow(700, 700, "test");
 
-    var gameTable: [rows][columns]u2 = std.mem.zeroes([rows][columns]u2);
+    var gameTable: GameTable = std.mem.zeroes([rows][columns]u2);
 
     while (!r.WindowShouldClose()) {
         const windowWidth = r.GetRenderWidth();
@@ -76,7 +77,7 @@ pub fn main() !void {
     }
 }
 
-fn placePoint(isYellow: *bool, gameTable: *[rows][columns]u2, mousePosition: r.struct_Vector2) ?Position {
+fn placePoint(isYellow: *bool, gameTable: *GameTable, mousePosition: r.struct_Vector2) ?Position {
     const column: usize = @intFromFloat(@divFloor(mousePosition.x, @as(f32, @floatFromInt(columnSize))));
     if (column > columns - 1) {
         std.log.info("Clicked outside", .{});
@@ -96,7 +97,7 @@ fn placePoint(isYellow: *bool, gameTable: *[rows][columns]u2, mousePosition: r.s
     return null;
 }
 
-fn checkGameOver(gameTable: *[rows][columns]u2, lastMove: Position, isYellow: bool) bool {
+fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool {
     const target: u2 = if (isYellow) YELLOW else RED;
     const col = lastMove[1];
     const row = lastMove[0];
@@ -183,7 +184,7 @@ fn checkGameOver(gameTable: *[rows][columns]u2, lastMove: Position, isYellow: bo
     return false;
 }
 
-fn printGame(gameTable: [rows][columns]u2) !void {
+fn printGame(gameTable: GameTable) !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
