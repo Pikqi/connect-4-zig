@@ -198,6 +198,18 @@ fn checkGameTie(gameTable: GameTable) bool {
     return true;
 }
 
+// Returns "height" of columns
+fn checkPossibleMoves(gameTable: GameTable, result: *[7]u8) void {
+    for (gameTable, 0..) |row, i| {
+        _ = i; // autofix
+        for (row, 0..) |col, j| {
+            if (col != EMPTY) {
+                result.*[j] += 1;
+            }
+        }
+    }
+}
+
 fn printGame(gameTable: GameTable) !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
