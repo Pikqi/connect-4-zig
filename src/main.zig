@@ -17,6 +17,8 @@ const rows = 6;
 const columns = 7;
 const GameTable = [rows][columns]u2;
 
+const isMultiplayer = false;
+
 pub fn main() !void {
     var isYellow = true;
     var gameOvew = false;
@@ -32,19 +34,26 @@ pub fn main() !void {
         const windowWidth = r.GetRenderWidth();
         _ = windowWidth; // autofix
         const windowHeight = r.GetRenderHeight();
-        if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
-            const mousePos = r.GetMousePosition();
-            _ = mousePos; // autofix
-            const placedPointOpt = placePoint(&isYellow, &gameTable, r.GetMousePosition());
-            if (placedPointOpt) |placedPoint| {
-                if (checkGameTie(gameTable)) {
-                    std.log.info("GAME TIED", .{});
-                    gameOvew = true;
-                } else if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
-                    std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
-                    gameOvew = true;
+
+        if (isMultiplayer or isYellow) {
+            // User interaction
+            if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
+                const placedPointOpt = placePoint(isYellow, gameTable, r.GetMousePosition());
+                if (placedPointOpt) |placedPoint| {
+                    playATurn(&gameTable, &isYellow, placedPoint);
+                    if (checkGameTie(gameTable)) {
+                        std.log.info("GAME TIED", .{});
+                        gameOvew = true;
+                    } else if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
+                        std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
+                        gameOvew = true;
+                    }
                 }
             }
+        } else {
+            // AI Turn
+            const best_pos = startMinMax(gameTable);
+            playATurn(&gameTable, &isYellow, best_pos);
         }
 
         // DRAW
@@ -81,24 +90,32 @@ pub fn main() !void {
     }
 }
 
-fn placePoint(isYellow: *bool, gameTable: *GameTable, mousePosition: r.struct_Vector2) ?Position {
+fn placePoint(isYellow: bool, gameTable: GameTable, mousePosition: r.struct_Vector2) ?Position {
+    _ = isYellow; // autofix
     const column: usize = @intFromFloat(@divFloor(mousePosition.x, @as(f32, @floatFromInt(columnSize))));
     if (column > columns - 1) {
         std.log.info("Clicked outside", .{});
         return null;
     }
-    if (gameTable.*[rows - 1][column] != 0) {
+    if (gameTable[rows - 1][column] != 0) {
         std.log.info("Column full", .{});
         return null;
     }
     for (gameTable, 0..) |row, i| {
         if (row[column] == EMPTY) {
-            gameTable[i][column] = if (isYellow.*) 1 else 2;
-            isYellow.* = !isYellow.*;
             return Position{ i, column };
         }
     }
     return null;
+}
+
+fn playATurn(
+    gameTable: *GameTable,
+    isYellow: *bool,
+    play: Position,
+) void {
+    gameTable.*[play[0]][play[1]] = if (isYellow.*) YELLOW else RED;
+    isYellow.* = !isYellow.*;
 }
 
 fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool {
@@ -209,6 +226,12 @@ fn checkPossibleMoves(gameTable: GameTable, result: *[7]u8) void {
             }
         }
     }
+}
+
+fn startMinMax(gameTable: GameTable) Position {
+    _ = gameTable; // autofix
+
+    return .{ 1, 1 };
 }
 
 fn printGame(gameTable: GameTable) !void {
