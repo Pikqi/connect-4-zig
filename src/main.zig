@@ -102,15 +102,21 @@ fn placePoint(isYellow: *bool, gameTable: *GameTable, mousePosition: r.struct_Ve
 }
 
 fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool {
+    return getGameScore(gameTable, lastMove, isYellow) >= 3;
+}
+
+fn getGameScore(gameTable: *GameTable, lastMove: Position, isYellow: bool) u32 {
     const target: u2 = if (isYellow) YELLOW else RED;
-    const col = lastMove[1];
-    const row = lastMove[0];
+    const col: u8 = @intCast(lastMove[1]);
+    const row: u8 = @intCast(lastMove[0]);
+
+    var score: u8 = 0;
 
     // Check down
-    var i: usize = row;
+    var i: u8 = row;
     while (gameTable[i][col] == target) {
-        if (row - i >= 3 and i >= 0) {
-            return true;
+        if (i >= 0) {
+            score = @max(score, row - i);
         }
         if (i > 0) {
             i -= 1;
@@ -133,9 +139,7 @@ fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool
         horizontal += 1;
     }
 
-    if (left + right >= 3) {
-        return true;
-    }
+    score = @max(score, @as(u8, @intCast(left + right)));
 
     //l2r diagonal
     left = 0;
@@ -157,9 +161,7 @@ fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool
         vertical += 1;
     }
 
-    if (left + right >= 3) {
-        return true;
-    }
+    score = @max(score, @as(u8, @intCast(left + right)));
 
     //r2l diagonal
     left = 0;
@@ -181,11 +183,10 @@ fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool
         vertical -= 1;
     }
 
-    if (left + right >= 3) {
-        return true;
-    }
+    score = @max(score, @as(u8, @intCast(left + right)));
 
-    return false;
+    std.log.info("{s} SCORE: {d}", .{ if (isYellow) "Yellow" else "Red", score });
+    return score;
 }
 
 fn checkGameTie(gameTable: GameTable) bool {
