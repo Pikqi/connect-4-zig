@@ -28,20 +28,22 @@ const ENEMY_WIN_SCORE = -10000000;
 const ENEMY_THREE_IN_A_ROW = -700;
 const ENEMY_TWO_IN_A_ROW = -40;
 
+// ---- UI ----
+const FONT_SIZE = 25;
+
 pub fn main() !void {
     var isYellow = true;
-    var gameOvew = false;
+    var gameOver = false;
 
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    r.SetConfigFlags(r.FLAG_VSYNC_HINT | r.FLAG_MSAA_4X_HINT | r.FLAG_WINDOW_RESIZABLE);
+    r.SetConfigFlags(r.FLAG_VSYNC_HINT | r.FLAG_MSAA_4X_HINT | r.FLAG_WINDOW_MINIMIZED);
     r.InitWindow(700, 700, "test");
 
     var gameTable: GameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
 
     while (!r.WindowShouldClose()) {
         const windowWidth = r.GetRenderWidth();
-        _ = windowWidth; // autofix
         const windowHeight = r.GetRenderHeight();
 
         if (!isMultiplayer or isYellow) {
@@ -52,10 +54,10 @@ pub fn main() !void {
                     playATurn(&gameTable, &isYellow, placedPoint);
                     if (checkGameTie(gameTable)) {
                         std.log.info("GAME TIED", .{});
-                        gameOvew = true;
+                        gameOver = true;
                     } else if (checkGameOver(&gameTable, if (isYellow) RED else YELLOW)) {
                         std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
-                        gameOvew = true;
+                        gameOver = true;
                     }
                 }
             }
@@ -65,25 +67,25 @@ pub fn main() !void {
             playATurn(&gameTable, &isYellow, best_pos);
             if (checkGameTie(gameTable)) {
                 std.log.info("GAME TIED", .{});
-                gameOvew = true;
+                gameOver = true;
             } else if (checkGameOver(&gameTable, if (isYellow) RED else YELLOW)) {
                 std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
-                gameOvew = true;
+                gameOver = true;
             }
         }
 
         // DRAW
         r.BeginDrawing();
         defer r.EndDrawing();
-        r.ClearBackground(r.WHITE);
-        if (gameOvew) {
+        if (gameOver) {
+            r.DrawText("GAME OVER", @divFloor(windowWidth, 2), 20, FONT_SIZE, r.BLACK);
             if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
-                gameOvew = false;
+                gameOver = false;
                 gameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
                 isYellow = true;
             }
-            continue;
         }
+        r.ClearBackground(r.WHITE);
 
         for (1..COLUMNS) |i| {
             const x = @as(c_int, @intCast(i)) * columnSize;
