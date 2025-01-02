@@ -13,11 +13,20 @@ const YELLOW = 1;
 const radius: c_int = 50;
 const columnSize: c_int = radius * 2;
 
-const rows = 6;
-const columns = 7;
-const GameTable = [rows][columns]u2;
+const ROWS = 6;
+const COLUMNS = 7;
+const GameTable = [ROWS][COLUMNS]u2;
 
-const isMultiplayer = false;
+const isMultiplayer = true;
+
+// ---- SCORE PARAMETERS -----
+const WIN_SCORE = 10000000;
+const THREE_IN_A_ROW = 500;
+const TWO_IN_A_ROW = 50;
+
+const ENEMY_WIN_SCORE = -10000000;
+const ENEMY_THREE_IN_A_ROW = -700;
+const ENEMY_TWO_IN_A_ROW = -40;
 
 pub fn main() !void {
     var isYellow = true;
@@ -28,14 +37,14 @@ pub fn main() !void {
     r.SetConfigFlags(r.FLAG_VSYNC_HINT | r.FLAG_MSAA_4X_HINT | r.FLAG_WINDOW_RESIZABLE);
     r.InitWindow(700, 700, "test");
 
-    var gameTable: GameTable = std.mem.zeroes([rows][columns]u2);
+    var gameTable: GameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
 
     while (!r.WindowShouldClose()) {
         const windowWidth = r.GetRenderWidth();
         _ = windowWidth; // autofix
         const windowHeight = r.GetRenderHeight();
 
-        if (isMultiplayer or isYellow) {
+        if (!isMultiplayer or isYellow) {
             // User interaction
             if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
                 const placedPointOpt = placePoint(isYellow, gameTable, r.GetMousePosition());
@@ -44,7 +53,7 @@ pub fn main() !void {
                     if (checkGameTie(gameTable)) {
                         std.log.info("GAME TIED", .{});
                         gameOvew = true;
-                    } else if (checkGameOver(&gameTable, placedPoint, !isYellow)) {
+                    } else if (checkGameOver(&gameTable, placedPoint, if (isYellow) RED else YELLOW)) {
                         std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
                         gameOvew = true;
                     }
@@ -54,6 +63,13 @@ pub fn main() !void {
             // AI Turn
             const best_pos = startMinMax(gameTable);
             playATurn(&gameTable, &isYellow, best_pos);
+            if (checkGameTie(gameTable)) {
+                std.log.info("GAME TIED", .{});
+                gameOvew = true;
+            } else if (checkGameOver(&gameTable, best_pos, if (isYellow) RED else YELLOW)) {
+                std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
+                gameOvew = true;
+            }
         }
 
         // DRAW
@@ -63,16 +79,16 @@ pub fn main() !void {
         if (gameOvew) {
             if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
                 gameOvew = false;
-                gameTable = std.mem.zeroes([rows][columns]u2);
+                gameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
                 isYellow = true;
             }
             continue;
         }
 
-        for (1..columns) |i| {
+        for (1..COLUMNS) |i| {
             const x = @as(c_int, @intCast(i)) * columnSize;
 
-            r.DrawLine(x, windowHeight - rows * columnSize, x, windowHeight, r.BLACK);
+            r.DrawLine(x, windowHeight - ROWS * columnSize, x, windowHeight, r.BLACK);
         }
 
         for (gameTable, 0..) |row, i| {
@@ -93,11 +109,11 @@ pub fn main() !void {
 fn placePoint(isYellow: bool, gameTable: GameTable, mousePosition: r.struct_Vector2) ?Position {
     _ = isYellow; // autofix
     const column: usize = @intFromFloat(@divFloor(mousePosition.x, @as(f32, @floatFromInt(columnSize))));
-    if (column > columns - 1) {
+    if (column > COLUMNS - 1) {
         std.log.info("Clicked outside", .{});
         return null;
     }
-    if (gameTable[rows - 1][column] != 0) {
+    if (gameTable[ROWS - 1][column] != 0) {
         std.log.info("Column full", .{});
         return null;
     }
@@ -118,96 +134,88 @@ fn playATurn(
     isYellow.* = !isYellow.*;
 }
 
-fn checkGameOver(gameTable: *GameTable, lastMove: Position, isYellow: bool) bool {
-    return getGameScore(gameTable, lastMove, isYellow) >= 3;
+fn checkGameOver(gameTable: *GameTable, target: u2) bool {
+    return @abs(evaluateBoard(gameTable.*, target)) >= WIN_SCORE / 2;
 }
 
-fn getGameScore(gameTable: *GameTable, lastMove: Position, isYellow: bool) u32 {
-    const target: u2 = if (isYellow) YELLOW else RED;
-    const col: u8 = @intCast(lastMove[1]);
-    const row: u8 = @intCast(lastMove[0]);
+fn evalWindow(window: []const u2, target: u2) i32 {
+    var score: i32 = 0;
+    var targetCount: u3 = 0;
+    var emptyCount: u3 = 0;
+    var enemyCount: u3 = 0;
+    if (window.len < 4) {
+        return 0;
+    }
 
-    var score: u8 = 0;
-
-    // Check down
-    var i: u8 = row;
-    while (gameTable[i][col] == target) {
-        if (i >= 0) {
-            score = @max(score, row - i);
-        }
-        if (i > 0) {
-            i -= 1;
+    for (window) |value| {
+        if (value == EMPTY) {
+            emptyCount += 1;
+        } else if (value == target) {
+            targetCount += 1;
         } else {
-            break;
+            enemyCount += 1;
+        }
+    }
+    if (targetCount == 4) {
+        score += WIN_SCORE;
+    } else if (targetCount == 3 and emptyCount == 1) {
+        score += THREE_IN_A_ROW;
+    } else if (enemyCount == 4) {
+        score += ENEMY_WIN_SCORE;
+    } else if (enemyCount == 3 and emptyCount == 1) {
+        score += ENEMY_THREE_IN_A_ROW;
+    }
+
+    return score;
+}
+
+fn evaluateBoard(gameTable: GameTable, target: u2) i32 {
+    var score: i32 = 0;
+    // horizontal
+    for (gameTable) |row| {
+        for (0..COLUMNS - 3) |j| {
+            score += evalWindow(row[j .. j + 4], target);
         }
     }
 
-    // Check Horizontal
-    var left: i5 = 0;
-    var horizontal: isize = @as(isize, @intCast(col)) - 1;
-    while (horizontal >= 0 and gameTable[row][@intCast(horizontal)] == target) {
-        left += 1;
-        horizontal -= 1;
-    }
-    var right: i5 = 0;
-    horizontal = @intCast(col + 1);
-    while (horizontal < columns and gameTable[row][@intCast(horizontal)] == target) {
-        right += 1;
-        horizontal += 1;
+    //vertical
+    for (3..ROWS) |i| {
+        for (0..COLUMNS) |j| {
+            // std.log.debug("i:{d} j:{d}", .{ i, j });
+            var window: [4]u2 = .{ 0, 0, 0, 0 };
+            for (0..window.len) |k| {
+                window[k] = gameTable[i - k][j];
+            }
+            score += evalWindow(&window, target);
+        }
     }
 
-    score = @max(score, @as(u8, @intCast(left + right)));
-
-    //l2r diagonal
-    left = 0;
-    horizontal = @as(isize, @intCast(col)) - 1;
-    var vertical: isize = @as(isize, @intCast(row)) - 1;
-    while (horizontal >= 0 and vertical >= 0 and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
-        left += 1;
-        horizontal -= 1;
-        vertical -= 1;
+    // right diagonal
+    for (0..ROWS - 3) |i| {
+        for (0..COLUMNS - 3) |j| {
+            var window: [4]u2 = .{ 0, 0, 0, 0 };
+            for (0..window.len) |k| {
+                window[k] = gameTable[i + k][j + k];
+            }
+            score += evalWindow(&window, target);
+        }
+    }
+    // left diagonal
+    for (0..ROWS - 3) |i| {
+        for (3..COLUMNS) |j| {
+            var window: [4]u2 = .{ 0, 0, 0, 0 };
+            for (0..window.len) |k| {
+                window[k] = gameTable[i + k][j - k];
+            }
+            score += evalWindow(&window, target);
+        }
     }
 
-    right = 0;
-    horizontal = @as(isize, @intCast(col)) + 1;
-    vertical = @as(isize, @intCast(row)) + 1;
-
-    while (horizontal < columns and vertical < rows and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
-        right += 1;
-        horizontal += 1;
-        vertical += 1;
-    }
-
-    score = @max(score, @as(u8, @intCast(left + right)));
-
-    //r2l diagonal
-    left = 0;
-    horizontal = @as(isize, @intCast(col)) - 1;
-    vertical = @as(isize, @intCast(row)) + 1;
-    while (horizontal >= 0 and vertical < rows and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
-        left += 1;
-        horizontal -= 1;
-        vertical += 1;
-    }
-
-    right = 0;
-    horizontal = @as(isize, @intCast(col)) + 1;
-    vertical = @as(isize, @intCast(row)) - 1;
-
-    while (horizontal < columns and vertical > 0 and gameTable[@intCast(vertical)][@intCast(horizontal)] == target) {
-        right += 1;
-        horizontal += 1;
-        vertical -= 1;
-    }
-
-    score = @max(score, @as(u8, @intCast(left + right)));
-
-    std.log.info("{s} SCORE: {d}", .{ if (isYellow) "Yellow" else "Red", score });
     return score;
 }
 
 fn checkGameTie(gameTable: GameTable) bool {
-    printGame(gameTable) catch unreachable;
+    // printGame(gameTable) catch unreachable;
     for (gameTable[gameTable.len - 1]) |value| {
         if (value == EMPTY) {
             return false;
@@ -217,21 +225,47 @@ fn checkGameTie(gameTable: GameTable) bool {
 }
 
 // Returns "height" of columns
-fn checkPossibleMoves(gameTable: GameTable, result: *[7]u8) void {
-    for (gameTable, 0..) |row, i| {
-        _ = i; // autofix
+fn checkPossibleMoves(gameTable: GameTable) [7]u8 {
+    var result: [7]u8 = std.mem.zeroes([7]u8);
+    for (gameTable) |row| {
         for (row, 0..) |col, j| {
             if (col != EMPTY) {
-                result.*[j] += 1;
+                result[j] += 1;
             }
         }
     }
+    return result;
 }
 
-fn startMinMax(gameTable: GameTable) Position {
-    _ = gameTable; // autofix
+fn startMinMax(gameTableImut: GameTable) Position {
+    var gameTable = gameTableImut;
+    const possibleMoves = checkPossibleMoves(gameTable);
+    var bestScore: i32 = std.math.minInt(i32);
+    var bestMove: Position = undefined;
 
-    return .{ 1, 1 };
+    for (possibleMoves, 0..) |value, i| {
+        if (value >= 6) {
+            continue;
+        }
+        gameTable[value][i] = RED;
+        defer gameTable[value][i] = EMPTY;
+
+        const branchScore = evaluateBoard(gameTable, RED);
+        std.log.info("col: {d} branchScore = {d}", .{ i, branchScore });
+
+        if (branchScore > bestScore) {
+            bestScore = @intCast(branchScore);
+            bestMove = .{ value, i };
+        }
+    }
+    std.log.info("Best score {d}", .{bestScore});
+    // if (bestScore == 0) {
+    //     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
+    //     var prng = std.rand.DefaultPrng.init(seed);
+    //     const rand = prng.random().intRangeAtMost(usize, 0, COLUMNS - 1);
+    //     bestMove = .{ possibleMoves[rand], rand };
+    // }
+    return bestMove;
 }
 
 fn printGame(gameTable: GameTable) !void {
