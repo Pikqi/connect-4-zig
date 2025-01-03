@@ -4,7 +4,14 @@ const r = @cImport({
     @cInclude("raymath.h");
     @cInclude("rlgl.h");
 });
+
 const Position = @Vector(2, usize);
+const BranchThread = struct {
+    thread: std.Thread,
+    isRunning: bool = false,
+    yMove: u8,
+    result: i32,
+};
 
 const EMPTY = 0;
 const RED = 2;
@@ -18,6 +25,7 @@ const COLUMNS = 7;
 const GameTable = [ROWS][COLUMNS]u2;
 
 const isMultiplayer = true;
+const DEFAULT_DEPTH = 5;
 
 // ---- SCORE PARAMETERS -----
 const WIN_SCORE = 10000000;
@@ -34,6 +42,8 @@ const FONT_SIZE = 25;
 pub fn main() !void {
     var isYellow = true;
     var gameOver = false;
+    var threaded = false;
+    var minimaxDepth: i32 = DEFAULT_DEPTH;
 
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -63,7 +73,13 @@ pub fn main() !void {
             }
         } else {
             // AI Turn
-            const best_pos = startMinMax(gameTable);
+            var best_pos: Position = undefined;
+            if (threaded) {
+                best_pos = try startMinMaxThreaded(gameTable, minimaxDepth);
+            } else {
+                best_pos = startMinMax(gameTable, minimaxDepth);
+            }
+
             playATurn(&gameTable, &isYellow, best_pos);
             if (checkGameTie(gameTable)) {
                 std.log.info("GAME TIED", .{});
@@ -72,6 +88,15 @@ pub fn main() !void {
                 std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
                 gameOver = true;
             }
+        }
+
+        if (r.IsKeyPressed(r.KEY_T)) {
+            threaded = !threaded;
+        }
+        if (r.IsKeyPressed(r.KEY_D) and r.IsKeyDown(r.KEY_LEFT_SHIFT)) {
+            minimaxDepth = @max(1, minimaxDepth - 1);
+        } else if (r.IsKeyPressed(r.KEY_D)) {
+            minimaxDepth += 1;
         }
 
         // DRAW
@@ -85,6 +110,15 @@ pub fn main() !void {
                 isYellow = true;
             }
         }
+        if (threaded) {
+            r.DrawText("Threaded ON, Press t to toggle", 10, 20, FONT_SIZE, r.GREEN);
+        } else {
+            r.DrawText("Threaded OFF, Press t to toggle", 10, 20, FONT_SIZE, r.RED);
+        }
+        var textBuff: [20]u8 = undefined;
+        const text = try std.fmt.bufPrintZ(&textBuff, "Depth: {d}", .{minimaxDepth});
+        r.DrawText(text, 10, 40, FONT_SIZE, r.BLACK);
+
         r.ClearBackground(r.WHITE);
 
         for (1..COLUMNS) |i| {
@@ -239,7 +273,7 @@ fn checkPossibleMoves(gameTable: GameTable) [7]u8 {
     return result;
 }
 
-fn startMinMax(gameTableImut: GameTable) Position {
+fn startMinMax(gameTableImut: GameTable, depth: i32) Position {
     var gameTable = gameTableImut;
     const possibleMoves = checkPossibleMoves(gameTable);
     var bestScore: i32 = std.math.minInt(i32);
@@ -252,7 +286,7 @@ fn startMinMax(gameTableImut: GameTable) Position {
         gameTable[value][i] = RED;
         defer gameTable[value][i] = EMPTY;
 
-        const branchScore = minimax(&gameTable, false, .{ value, i }, 5);
+        const branchScore = minimax(&gameTable, false, .{ value, i }, depth);
         std.log.debug("col: {d} branchScore = {d}", .{ i, branchScore });
 
         if (branchScore > bestScore) {
@@ -302,6 +336,88 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32)
         }
     }
     return bestScore;
+}
+
+// THREADED MINIXMAX - NO ALPHABETA
+fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32) !Position {
+    var gameTable = gameTableImut;
+    const possibleMoves = checkPossibleMoves(gameTable);
+    var bestScore: i32 = std.math.minInt(i32);
+    var bestMove: Position = undefined;
+    var threads: [COLUMNS]BranchThread = undefined;
+    inline for (0..threads.len) |i| {
+        threads[i] = BranchThread{ .result = 0, .thread = undefined, .yMove = 0, .isRunning = false };
+    }
+
+    for (possibleMoves, 0..) |value, i| {
+        if (value >= 6) {
+            continue;
+        }
+        gameTable[value][i] = RED;
+        defer gameTable[value][i] = EMPTY;
+
+        var branchThread = &threads[i];
+
+        const thread = try std.Thread.spawn(.{}, minimaxThread, .{ gameTable, false, .{ value, i }, depth, &branchThread.result });
+        branchThread.thread = thread;
+        branchThread.isRunning = true;
+        branchThread.yMove = value;
+    }
+    for (0..threads.len) |i| {
+        if (threads[i].isRunning == false) {
+            continue;
+        }
+        threads[i].thread.join();
+
+        const branchScore = threads[i].result;
+        std.log.debug("column: {d} score :{d}", .{ i, branchScore });
+
+        if (branchScore > bestScore) {
+            bestScore = @intCast(branchScore);
+            bestMove = .{ threads[i].yMove, i };
+        }
+    }
+    std.log.debug("Best score {d}", .{bestScore});
+    return bestMove;
+}
+
+fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, depth: i32, result: *i32) void {
+    var gameTable = gameTableImut;
+    const player: u2 = if (isMaximizer) YELLOW else RED;
+    gameTable[move[0]][move[1]] = player;
+    defer gameTable[move[0]][move[1]] = EMPTY;
+
+    printGame(gameTable) catch unreachable;
+    if (checkGameTie(gameTable)) {
+        result.* = 0;
+        return;
+    }
+
+    const nodeScore = evaluateBoard(gameTable, RED);
+    if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
+        result.* = nodeScore * depth;
+        return;
+    }
+
+    var bestScore: i32 = if (isMaximizer) std.math.minInt(i32) else std.math.maxInt(i32);
+
+    const possibleMoves = checkPossibleMoves(gameTable);
+    for (possibleMoves, 0..) |row, col| {
+        if (row >= ROWS) {
+            continue;
+        }
+        const branchScore = minimax(&gameTable, !isMaximizer, .{ row, col }, depth - 1);
+        if (isMaximizer) {
+            if (branchScore > bestScore) {}
+            bestScore = branchScore;
+        } else {
+            if (branchScore < bestScore) {
+                bestScore = branchScore;
+            }
+        }
+    }
+    std.log.info("bestScore : {d}", .{bestScore});
+    result.* = bestScore;
 }
 
 fn printGame(gameTable: GameTable) !void {
