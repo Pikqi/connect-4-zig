@@ -28,11 +28,11 @@ const isMultiplayer = true;
 const DEFAULT_DEPTH = 5;
 
 // ---- SCORE PARAMETERS -----
-const WIN_SCORE = 10000000;
+const WIN_SCORE = 1000000;
 const THREE_IN_A_ROW = 500;
 const TWO_IN_A_ROW = 50;
 
-const ENEMY_WIN_SCORE = -10000000;
+const ENEMY_WIN_SCORE = -100000000;
 const ENEMY_THREE_IN_A_ROW = -700;
 const ENEMY_TWO_IN_A_ROW = -40;
 
@@ -44,6 +44,8 @@ pub fn main() !void {
     var gameOver = false;
     var threaded = false;
     var minimaxDepth: i32 = DEFAULT_DEPTH;
+
+    var lastTurnMiliSeconds: i32 = 0;
 
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -74,11 +76,15 @@ pub fn main() !void {
         } else {
             // AI Turn
             var best_pos: Position = undefined;
+            const startTimestamp = std.time.nanoTimestamp();
             if (threaded) {
                 best_pos = try startMinMaxThreaded(gameTable, minimaxDepth);
             } else {
                 best_pos = startMinMax(gameTable, minimaxDepth);
             }
+            const diffNanoTime = std.time.nanoTimestamp() - startTimestamp;
+            lastTurnMiliSeconds = @intCast(@divFloor(diffNanoTime, std.time.ns_per_ms));
+            std.log.info("Last turn took: {d} ms", .{lastTurnMiliSeconds});
 
             playATurn(&gameTable, &isYellow, best_pos);
             if (checkGameTie(gameTable)) {
@@ -115,9 +121,12 @@ pub fn main() !void {
         } else {
             r.DrawText("Threaded OFF, Press t to toggle", 10, 20, FONT_SIZE, r.RED);
         }
-        var textBuff: [20]u8 = undefined;
-        const text = try std.fmt.bufPrintZ(&textBuff, "Depth: {d}", .{minimaxDepth});
-        r.DrawText(text, 10, 40, FONT_SIZE, r.BLACK);
+        var textBuff: [40]u8 = undefined;
+        const depthText = try std.fmt.bufPrintZ(&textBuff, "Depth: {d}", .{minimaxDepth});
+        r.DrawText(depthText, 10, 40, FONT_SIZE, r.BLACK);
+
+        const timingText = try std.fmt.bufPrintZ(&textBuff, "Last turn took: {d} ms", .{lastTurnMiliSeconds});
+        r.DrawText(timingText, 10, 60, FONT_SIZE, r.BLACK);
 
         r.ClearBackground(r.WHITE);
 
@@ -315,7 +324,7 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32)
 
     const nodeScore = evaluateBoard(gameTable.*, RED);
     if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
-        return nodeScore * depth;
+        return nodeScore * (depth + 1);
     }
 
     var bestScore: i32 = if (isMaximizer) std.math.minInt(i32) else std.math.maxInt(i32);
