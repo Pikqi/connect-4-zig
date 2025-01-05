@@ -49,12 +49,12 @@ const FONT_SIZE = 25;
 const WIDTH = COLUMNS * columnSize;
 const HEIGHT = ROWS * columnSize + TOP_PADDING;
 const TEXT_GAP = FONT_SIZE + 5;
+var minimaxDepth: i32 = DEFAULT_DEPTH;
 
 pub fn main() !void {
     var isYellow = true;
     var gameOver = false;
     var mode: GameMode = GameMode.MINIMAX;
-    var minimaxDepth: i32 = DEFAULT_DEPTH;
 
     var lastTurnMiliSeconds: i32 = 0;
 
@@ -354,8 +354,6 @@ fn startMinMax(gameTableImut: GameTable, depth: i32, target: u2) Position {
         if (value >= 6) {
             continue;
         }
-        gameTable[value][i] = RED;
-        defer gameTable[value][i] = EMPTY;
 
         const branchScore = minimax(&gameTable, false, .{ value, i }, depth, target);
         std.log.debug("col: {d} branchScore = {d}", .{ i, branchScore });
@@ -379,6 +377,9 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32,
     }
 
     const nodeScore = evaluateBoard(gameTable.*, target);
+    if (depth == minimaxDepth - 1 and isMaximizer and @abs(nodeScore) > WIN_SCORE) {
+        return std.math.minInt(i32) + 1;
+    }
     if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
         return nodeScore * (depth + 1);
     }
@@ -418,7 +419,7 @@ fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32, target: u2) !Positi
         if (value >= 6) {
             continue;
         }
-        gameTable[value][i] = RED;
+        gameTable[value][i] = target;
         defer gameTable[value][i] = EMPTY;
 
         var branchThread = &threads[i];
@@ -452,13 +453,18 @@ fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, de
     gameTable[move[0]][move[1]] = player;
     defer gameTable[move[0]][move[1]] = EMPTY;
 
-    printGame(gameTable) catch unreachable;
     if (checkGameTie(gameTable)) {
         result.* = 0;
         return;
     }
 
     const nodeScore = evaluateBoard(gameTable, RED);
+
+    if (depth == minimaxDepth - 1 and isMaximizer and @abs(nodeScore) > WIN_SCORE) {
+        result.* = std.math.minInt(i32) + 1;
+        return;
+    }
+
     if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
         result.* = nodeScore * depth;
         return;
