@@ -25,14 +25,15 @@ const COLUMNS = 7;
 const GameTable = [ROWS][COLUMNS]u2;
 
 const isMultiplayer = true;
+const isAiVSAi = false;
 const DEFAULT_DEPTH = 5;
 
 // ---- SCORE PARAMETERS -----
-const WIN_SCORE = 1000000;
+const WIN_SCORE = 10000;
 const THREE_IN_A_ROW = 500;
 const TWO_IN_A_ROW = 50;
 
-const ENEMY_WIN_SCORE = -100000000;
+const ENEMY_WIN_SCORE = -100000;
 const ENEMY_THREE_IN_A_ROW = -700;
 const ENEMY_TWO_IN_A_ROW = -40;
 
@@ -58,41 +59,45 @@ pub fn main() !void {
         const windowWidth = r.GetRenderWidth();
         const windowHeight = r.GetRenderHeight();
 
-        if (!isMultiplayer or isYellow) {
-            // User interaction
-            if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
-                const placedPointOpt = placePoint(isYellow, gameTable, r.GetMousePosition());
-                if (placedPointOpt) |placedPoint| {
-                    playATurn(&gameTable, &isYellow, placedPoint);
-                    if (checkGameTie(gameTable)) {
-                        std.log.info("GAME TIED", .{});
-                        gameOver = true;
-                    } else if (checkGameOver(&gameTable, if (isYellow) RED else YELLOW)) {
-                        std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
-                        gameOver = true;
+        if (!gameOver) {
+            if (!isAiVSAi and (!isMultiplayer or isYellow)) {
+                // User interaction
+                if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
+                    const placedPointOpt = placePoint(isYellow, gameTable, r.GetMousePosition());
+                    if (placedPointOpt) |placedPoint| {
+                        playATurn(&gameTable, &isYellow, placedPoint);
+                        if (checkGameTie(gameTable)) {
+                            std.log.info("GAME TIED", .{});
+                            gameOver = true;
+                        } else if (checkGameOver(gameTable, if (isYellow) RED else YELLOW)) {
+                            std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
+                            gameOver = true;
+                        }
                     }
                 }
-            }
-        } else {
-            // AI Turn
-            var best_pos: Position = undefined;
-            const startTimestamp = std.time.nanoTimestamp();
-            if (threaded) {
-                best_pos = try startMinMaxThreaded(gameTable, minimaxDepth);
             } else {
-                best_pos = startMinMax(gameTable, minimaxDepth);
-            }
-            const diffNanoTime = std.time.nanoTimestamp() - startTimestamp;
-            lastTurnMiliSeconds = @intCast(@divFloor(diffNanoTime, std.time.ns_per_ms));
-            std.log.info("Last turn took: {d} ms", .{lastTurnMiliSeconds});
+                // AI Turn
+                var best_pos: Position = undefined;
+                const player: u2 = if (isYellow) YELLOW else RED;
+                const startTimestamp = std.time.nanoTimestamp();
+                if (threaded) {
+                    best_pos = try startMinMaxThreaded(gameTable, minimaxDepth, player);
+                } else {
+                    best_pos = startMinMax(gameTable, minimaxDepth, player);
+                }
+                const diffNanoTime = std.time.nanoTimestamp() - startTimestamp;
+                lastTurnMiliSeconds = @intCast(@divFloor(diffNanoTime, std.time.ns_per_ms));
+                std.log.info("Last turn took: {d} ms", .{lastTurnMiliSeconds});
 
-            playATurn(&gameTable, &isYellow, best_pos);
-            if (checkGameTie(gameTable)) {
-                std.log.info("GAME TIED", .{});
-                gameOver = true;
-            } else if (checkGameOver(&gameTable, if (isYellow) RED else YELLOW)) {
-                std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
-                gameOver = true;
+                playATurn(&gameTable, &isYellow, best_pos);
+                if (checkGameTie(gameTable)) {
+                    std.log.info("GAME TIED", .{});
+                    gameOver = true;
+                } else if (checkGameOver(gameTable, if (isYellow) RED else YELLOW)) {
+                    std.log.info("GAME OVER, {s} WON", .{if (!isYellow) "Yellow" else "Red"});
+                    gameOver = true;
+                    try printGame(gameTable);
+                }
             }
         }
 
@@ -179,8 +184,9 @@ fn playATurn(
     isYellow.* = !isYellow.*;
 }
 
-fn checkGameOver(gameTable: *GameTable, target: u2) bool {
-    return @abs(evaluateBoard(gameTable.*, target)) >= WIN_SCORE / 2;
+fn checkGameOver(gameTable: GameTable, target: u2) bool {
+    const score = @abs(evaluateBoard(gameTable, target));
+    return score >= WIN_SCORE / 2;
 }
 
 fn evalWindow(window: []const u2, target: u2) i32 {
@@ -226,7 +232,6 @@ fn evaluateBoard(gameTable: GameTable, target: u2) i32 {
     //vertical
     for (3..ROWS) |i| {
         for (0..COLUMNS) |j| {
-            // std.log.debug("i:{d} j:{d}", .{ i, j });
             var window: [4]u2 = .{ 0, 0, 0, 0 };
             for (0..window.len) |k| {
                 window[k] = gameTable[i - k][j];
@@ -282,7 +287,7 @@ fn checkPossibleMoves(gameTable: GameTable) [7]u8 {
     return result;
 }
 
-fn startMinMax(gameTableImut: GameTable, depth: i32) Position {
+fn startMinMax(gameTableImut: GameTable, depth: i32, target: u2) Position {
     var gameTable = gameTableImut;
     const possibleMoves = checkPossibleMoves(gameTable);
     var bestScore: i32 = std.math.minInt(i32);
@@ -295,7 +300,7 @@ fn startMinMax(gameTableImut: GameTable, depth: i32) Position {
         gameTable[value][i] = RED;
         defer gameTable[value][i] = EMPTY;
 
-        const branchScore = minimax(&gameTable, false, .{ value, i }, depth);
+        const branchScore = minimax(&gameTable, false, .{ value, i }, depth, target);
         std.log.debug("col: {d} branchScore = {d}", .{ i, branchScore });
 
         if (branchScore > bestScore) {
@@ -304,17 +309,11 @@ fn startMinMax(gameTableImut: GameTable, depth: i32) Position {
         }
     }
     std.log.debug("Best score {d}", .{bestScore});
-    // if (bestScore == 0) {
-    //     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-    //     var prng = std.rand.DefaultPrng.init(seed);
-    //     const rand = prng.random().intRangeAtMost(usize, 0, COLUMNS - 1);
-    //     bestMove = .{ possibleMoves[rand], rand };
-    // }
     return bestMove;
 }
 
-fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32) i32 {
-    const player: u2 = if (isMaximizer) YELLOW else RED;
+fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32, target: u2) i32 {
+    const player: u2 = if (isMaximizer) if (target == YELLOW) RED else YELLOW else target;
     gameTable[move[0]][move[1]] = player;
     defer gameTable[move[0]][move[1]] = EMPTY;
 
@@ -322,7 +321,7 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32)
         return 0;
     }
 
-    const nodeScore = evaluateBoard(gameTable.*, RED);
+    const nodeScore = evaluateBoard(gameTable.*, target);
     if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
         return nodeScore * (depth + 1);
     }
@@ -334,7 +333,7 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32)
         if (row >= ROWS) {
             continue;
         }
-        const branchScore = minimax(gameTable, !isMaximizer, .{ row, col }, depth - 1);
+        const branchScore = minimax(gameTable, !isMaximizer, .{ row, col }, depth - 1, target);
         if (isMaximizer) {
             if (branchScore > bestScore) {}
             bestScore = branchScore;
@@ -348,7 +347,7 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32)
 }
 
 // THREADED MINIXMAX - NO ALPHABETA
-fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32) !Position {
+fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32, target: u2) !Position {
     var gameTable = gameTableImut;
     const possibleMoves = checkPossibleMoves(gameTable);
     var bestScore: i32 = std.math.minInt(i32);
@@ -367,7 +366,7 @@ fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32) !Position {
 
         var branchThread = &threads[i];
 
-        const thread = try std.Thread.spawn(.{}, minimaxThread, .{ gameTable, false, .{ value, i }, depth, &branchThread.result });
+        const thread = try std.Thread.spawn(.{}, minimaxThread, .{ gameTable, false, .{ value, i }, depth, target, &branchThread.result });
         branchThread.thread = thread;
         branchThread.isRunning = true;
         branchThread.yMove = value;
@@ -390,9 +389,9 @@ fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32) !Position {
     return bestMove;
 }
 
-fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, depth: i32, result: *i32) void {
+fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, depth: i32, target: u2, result: *i32) void {
     var gameTable = gameTableImut;
-    const player: u2 = if (isMaximizer) YELLOW else RED;
+    const player: u2 = if (isMaximizer) if (target == YELLOW) RED else YELLOW else target;
     gameTable[move[0]][move[1]] = player;
     defer gameTable[move[0]][move[1]] = EMPTY;
 
@@ -415,7 +414,7 @@ fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, de
         if (row >= ROWS) {
             continue;
         }
-        const branchScore = minimax(&gameTable, !isMaximizer, .{ row, col }, depth - 1);
+        const branchScore = minimax(&gameTable, !isMaximizer, .{ row, col }, depth - 1, target);
         if (isMaximizer) {
             if (branchScore > bestScore) {}
             bestScore = branchScore;
