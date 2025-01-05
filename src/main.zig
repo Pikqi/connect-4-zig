@@ -25,7 +25,7 @@ const COLUMNS = 7;
 const GameTable = [ROWS][COLUMNS]u2;
 
 const isMultiplayer = true;
-const isAiVSAi = false;
+const isAiVSAi = true;
 const DEFAULT_DEPTH = 5;
 
 // ---- SCORE PARAMETERS -----
@@ -222,6 +222,30 @@ fn evalWindow(window: []const u2, target: u2) i32 {
 
 fn evaluateBoard(gameTable: GameTable, target: u2) i32 {
     var score: i32 = 0;
+
+    // center bias
+    for (gameTable, 0..) |row, i| {
+        for (row, 0..) |element, j| {
+            switch (element) {
+                YELLOW => {
+                    if (target == YELLOW) {
+                        score += centerBias[i][j];
+                    } else {
+                        score -= centerBias[i][j];
+                    }
+                },
+                RED => {
+                    if (target == RED) {
+                        score += centerBias[i][j];
+                    } else {
+                        score -= centerBias[i][j];
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
     // horizontal
     for (gameTable) |row| {
         for (0..COLUMNS - 3) |j| {
@@ -452,3 +476,11 @@ test "simple test" {
     try list.append(42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
+const centerBias: [ROWS][COLUMNS]u8 = .{
+    .{ 3, 4, 5, 7, 5, 5, 3 },
+    .{ 4, 6, 8, 10, 8, 6, 4 },
+    .{ 5, 7, 11, 13, 11, 7, 5 },
+    .{ 5, 7, 11, 13, 11, 7, 5 },
+    .{ 4, 6, 8, 10, 8, 6, 4 },
+    .{ 3, 4, 5, 7, 5, 5, 3 },
+};
