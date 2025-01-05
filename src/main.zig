@@ -13,6 +13,12 @@ const BranchThread = struct {
     result: i32,
 };
 
+const GameMode = enum(u3) {
+    MINIMAX,
+    MINIMAX_THREADED,
+    MINIMAX_APHA_BETA,
+};
+
 const EMPTY = 0;
 const RED = 2;
 const YELLOW = 1;
@@ -25,7 +31,7 @@ const COLUMNS = 7;
 const GameTable = [ROWS][COLUMNS]u2;
 
 const isMultiplayer = true;
-const isAiVSAi = true;
+const isAiVSAi = false;
 const DEFAULT_DEPTH = 5;
 
 // ---- SCORE PARAMETERS -----
@@ -38,12 +44,16 @@ const ENEMY_THREE_IN_A_ROW = -700;
 const ENEMY_TWO_IN_A_ROW = -40;
 
 // ---- UI ----
+const TOP_PADDING = 200;
 const FONT_SIZE = 25;
+const WIDTH = COLUMNS * columnSize;
+const HEIGHT = ROWS * columnSize + TOP_PADDING;
+const TEXT_GAP = FONT_SIZE + 5;
 
 pub fn main() !void {
     var isYellow = true;
     var gameOver = false;
-    var threaded = false;
+    var mode: GameMode = GameMode.MINIMAX;
     var minimaxDepth: i32 = DEFAULT_DEPTH;
 
     var lastTurnMiliSeconds: i32 = 0;
@@ -51,7 +61,7 @@ pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
     r.SetConfigFlags(r.FLAG_VSYNC_HINT | r.FLAG_MSAA_4X_HINT | r.FLAG_WINDOW_MINIMIZED);
-    r.InitWindow(700, 700, "test");
+    r.InitWindow(WIDTH, HEIGHT, "test");
 
     var gameTable: GameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
 
@@ -80,10 +90,16 @@ pub fn main() !void {
                 var best_pos: Position = undefined;
                 const player: u2 = if (isYellow) YELLOW else RED;
                 const startTimestamp = std.time.nanoTimestamp();
-                if (threaded) {
-                    best_pos = try startMinMaxThreaded(gameTable, minimaxDepth, player);
-                } else {
-                    best_pos = startMinMax(gameTable, minimaxDepth, player);
+                switch (mode) {
+                    .MINIMAX_THREADED => {
+                        best_pos = try startMinMaxThreaded(gameTable, minimaxDepth, player);
+                    },
+                    .MINIMAX => {
+                        best_pos = startMinMax(gameTable, minimaxDepth, player);
+                    },
+                    else => {
+                        std.log.err("Invalid mode", .{});
+                    },
                 }
                 const diffNanoTime = std.time.nanoTimestamp() - startTimestamp;
                 lastTurnMiliSeconds = @intCast(@divFloor(diffNanoTime, std.time.ns_per_ms));
@@ -101,37 +117,54 @@ pub fn main() !void {
             }
         }
 
-        if (r.IsKeyPressed(r.KEY_T)) {
-            threaded = !threaded;
+        if (r.IsKeyPressed(r.KEY_ONE)) {
+            mode = .MINIMAX;
+        } else if (r.IsKeyPressed(r.KEY_TWO)) {
+            mode = .MINIMAX_THREADED;
         }
-        if (r.IsKeyPressed(r.KEY_D) and r.IsKeyDown(r.KEY_LEFT_SHIFT)) {
+
+        if (r.IsKeyPressed(r.KEY_MINUS)) {
             minimaxDepth = @max(1, minimaxDepth - 1);
-        } else if (r.IsKeyPressed(r.KEY_D)) {
+        } else if (r.IsKeyPressed(r.KEY_EQUAL)) {
             minimaxDepth += 1;
         }
 
         // DRAW
         r.BeginDrawing();
         defer r.EndDrawing();
+
+        var textMargin: c_int = 5;
+
         if (gameOver) {
-            r.DrawText("GAME OVER", @divFloor(windowWidth, 2), 20, FONT_SIZE, r.BLACK);
+            r.DrawText("GAME OVER", @divFloor(windowWidth, 2) - 5 * FONT_SIZE, @divFloor(WIDTH, 2), FONT_SIZE * 2, r.BLACK);
             if (r.IsMouseButtonPressed(r.MOUSE_BUTTON_LEFT)) {
                 gameOver = false;
                 gameTable = std.mem.zeroes([ROWS][COLUMNS]u2);
                 isYellow = true;
             }
         }
-        if (threaded) {
-            r.DrawText("Threaded ON, Press t to toggle", 10, 20, FONT_SIZE, r.GREEN);
-        } else {
-            r.DrawText("Threaded OFF, Press t to toggle", 10, 20, FONT_SIZE, r.RED);
-        }
-        var textBuff: [40]u8 = undefined;
-        const depthText = try std.fmt.bufPrintZ(&textBuff, "Depth: {d}", .{minimaxDepth});
-        r.DrawText(depthText, 10, 40, FONT_SIZE, r.BLACK);
+
+        var textBuff: [100]u8 = undefined;
+
+        r.DrawText("Change mods with 1-3", 10, textMargin, FONT_SIZE, r.BLACK);
+        textMargin += TEXT_GAP;
+
+        const modeText = try std.fmt.bufPrintZ(&textBuff, "Mode: {s}", .{@tagName(mode)});
+        const modeColor: r.Color = switch (mode) {
+            .MINIMAX => r.RED,
+            .MINIMAX_THREADED => r.ORANGE,
+            .MINIMAX_APHA_BETA => r.GREEN,
+        };
+        r.DrawText(modeText, 10, textMargin, FONT_SIZE, modeColor);
+        textMargin += TEXT_GAP;
+
+        const depthText = try std.fmt.bufPrintZ(&textBuff, "Depth: {d} +/- to change", .{minimaxDepth});
+        r.DrawText(depthText, 10, textMargin, FONT_SIZE, r.BLACK);
+        textMargin += TEXT_GAP;
 
         const timingText = try std.fmt.bufPrintZ(&textBuff, "Last turn took: {d} ms", .{lastTurnMiliSeconds});
-        r.DrawText(timingText, 10, 60, FONT_SIZE, r.BLACK);
+        r.DrawText(timingText, 10, textMargin, FONT_SIZE, r.BLACK);
+        textMargin += TEXT_GAP;
 
         r.ClearBackground(r.WHITE);
 
