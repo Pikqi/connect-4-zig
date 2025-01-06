@@ -16,7 +16,7 @@ const BranchThread = struct {
 const GameMode = enum(u3) {
     MINIMAX,
     MINIMAX_THREADED,
-    MINIMAX_APHA_BETA,
+    MINIMAX_ALPHA_BETA,
 };
 
 const EMPTY = 0;
@@ -51,10 +51,11 @@ const HEIGHT = ROWS * columnSize + TOP_PADDING;
 const TEXT_GAP = FONT_SIZE + 5;
 var minimaxDepth: i32 = DEFAULT_DEPTH;
 
+var nodesVisited: i32 = 0;
 pub fn main() !void {
     var isYellow = true;
     var gameOver = false;
-    var mode: GameMode = GameMode.MINIMAX;
+    var mode: GameMode = GameMode.MINIMAX_ALPHA_BETA;
 
     var lastTurnMiliSeconds: i32 = 0;
 
@@ -90,6 +91,9 @@ pub fn main() !void {
                 var best_pos: Position = undefined;
                 const player: u2 = if (isYellow) YELLOW else RED;
                 const startTimestamp = std.time.nanoTimestamp();
+
+                nodesVisited = 0;
+
                 switch (mode) {
                     .MINIMAX_THREADED => {
                         best_pos = try startMinMaxThreaded(gameTable, minimaxDepth, player);
@@ -97,8 +101,8 @@ pub fn main() !void {
                     .MINIMAX => {
                         best_pos = startMinMax(gameTable, minimaxDepth, player);
                     },
-                    else => {
-                        std.log.err("Invalid mode", .{});
+                    .MINIMAX_ALPHA_BETA => {
+                        best_pos = startAlphaBeta(gameTable, minimaxDepth, player);
                     },
                 }
                 const diffNanoTime = std.time.nanoTimestamp() - startTimestamp;
@@ -121,6 +125,8 @@ pub fn main() !void {
             mode = .MINIMAX;
         } else if (r.IsKeyPressed(r.KEY_TWO)) {
             mode = .MINIMAX_THREADED;
+        } else if (r.IsKeyPressed(r.KEY_THREE)) {
+            mode = .MINIMAX_ALPHA_BETA;
         }
 
         if (r.IsKeyPressed(r.KEY_MINUS)) {
@@ -153,7 +159,7 @@ pub fn main() !void {
         const modeColor: r.Color = switch (mode) {
             .MINIMAX => r.RED,
             .MINIMAX_THREADED => r.ORANGE,
-            .MINIMAX_APHA_BETA => r.GREEN,
+            .MINIMAX_ALPHA_BETA => r.GREEN,
         };
         r.DrawText(modeText, 10, textMargin, FONT_SIZE, modeColor);
         textMargin += TEXT_GAP;
@@ -164,6 +170,10 @@ pub fn main() !void {
 
         const timingText = try std.fmt.bufPrintZ(&textBuff, "Last turn took: {d} ms", .{lastTurnMiliSeconds});
         r.DrawText(timingText, 10, textMargin, FONT_SIZE, r.BLACK);
+        textMargin += TEXT_GAP;
+
+        const nodesVisitedText = try std.fmt.bufPrintZ(&textBuff, "Nodes visited: {d}", .{nodesVisited});
+        r.DrawText(nodesVisitedText, 10, textMargin, FONT_SIZE, r.BLACK);
         textMargin += TEXT_GAP;
 
         r.ClearBackground(r.WHITE);
@@ -367,7 +377,9 @@ fn startMinMax(gameTableImut: GameTable, depth: i32, target: u2) Position {
     return bestMove;
 }
 
+// ------ REGULAR MINIMAX NO THREADING ------
 fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32, target: u2) i32 {
+    nodesVisited += 1;
     const player: u2 = if (isMaximizer) if (target == YELLOW) RED else YELLOW else target;
     gameTable[move[0]][move[1]] = player;
     defer gameTable[move[0]][move[1]] = EMPTY;
@@ -404,7 +416,84 @@ fn minimax(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32,
     return bestScore;
 }
 
-// THREADED MINIXMAX - NO ALPHABETA
+// ------ ALPHA BETA PRUNING ------
+
+fn startAlphaBeta(gameTableImut: GameTable, depth: i32, target: u2) Position {
+    var gameTable = gameTableImut;
+    const possibleMoves = checkPossibleMoves(gameTable);
+    var bestScore: i32 = std.math.minInt(i32);
+    var bestMove: Position = undefined;
+    var alpha: i32 = std.math.minInt(i32);
+    var beta: i32 = std.math.maxInt(i32);
+
+    for (possibleMoves, 0..) |value, i| {
+        if (value >= 6) {
+            continue;
+        }
+
+        const branchScore = alphaBeta(&gameTable, false, .{ value, i }, depth, target, &alpha, &beta);
+        std.log.debug("col: {d} branchScore = {d}", .{ i, branchScore });
+        std.log.info("alpha: {d} beta: {d}", .{ alpha, beta });
+
+        if (branchScore > bestScore) {
+            bestScore = @intCast(branchScore);
+            bestMove = .{ value, i };
+        }
+
+        if (branchScore > beta) {
+            break;
+        }
+        alpha = branchScore;
+    }
+    std.log.debug("Best score {d}", .{bestScore});
+    return bestMove;
+}
+
+fn alphaBeta(gameTable: *GameTable, isMaximizer: bool, move: Position, depth: i32, target: u2, alpha: *i32, beta: *i32) i32 {
+    nodesVisited += 1;
+    const player: u2 = if (isMaximizer) if (target == YELLOW) RED else YELLOW else target;
+    gameTable[move[0]][move[1]] = player;
+    defer gameTable[move[0]][move[1]] = EMPTY;
+
+    if (checkGameTie(gameTable.*)) {
+        return 0;
+    }
+
+    const nodeScore = evaluateBoard(gameTable.*, target);
+    if (depth == minimaxDepth - 1 and isMaximizer and @abs(nodeScore) > WIN_SCORE) {
+        return std.math.minInt(i32) + 1;
+    }
+    if (depth == 0 or @abs(nodeScore) > WIN_SCORE / 2) {
+        return nodeScore * (depth + 1);
+    }
+
+    var bestScore: i32 = if (isMaximizer) std.math.minInt(i32) else std.math.maxInt(i32);
+
+    const possibleMoves = checkPossibleMoves(gameTable.*);
+    for (possibleMoves, 0..) |row, col| {
+        if (row >= ROWS) {
+            continue;
+        }
+        const branchScore = alphaBeta(gameTable, !isMaximizer, .{ row, col }, depth - 1, target, alpha, beta);
+        if (isMaximizer) {
+            bestScore = @max(bestScore, branchScore);
+            if (branchScore > beta.*) {
+                break;
+            }
+
+            alpha.* = @max(bestScore, branchScore);
+        } else {
+            bestScore = @min(bestScore, branchScore);
+            if (branchScore < alpha.*) {
+                break;
+            }
+            beta.* = @min(bestScore, branchScore);
+        }
+    }
+    return bestScore;
+}
+
+// ------ THREADED MINIXMAX - NO ALPHABETA ------
 fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32, target: u2) !Position {
     var gameTable = gameTableImut;
     const possibleMoves = checkPossibleMoves(gameTable);
@@ -448,6 +537,7 @@ fn startMinMaxThreaded(gameTableImut: GameTable, depth: i32, target: u2) !Positi
 }
 
 fn minimaxThread(gameTableImut: GameTable, isMaximizer: bool, move: Position, depth: i32, target: u2, result: *i32) void {
+    nodesVisited += 1;
     var gameTable = gameTableImut;
     const player: u2 = if (isMaximizer) if (target == YELLOW) RED else YELLOW else target;
     gameTable[move[0]][move[1]] = player;
